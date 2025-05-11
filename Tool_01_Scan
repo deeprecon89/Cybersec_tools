@@ -1,0 +1,208 @@
+#!/bin/bash
+
+# Playbook Web Pentest Automatisé - Mode menu interactif
+# Par un futur Ethical Hacker :)
+
+# Vérifie la présence de jq pour format JSON si besoin
+command -v jq >/dev/null 2>&1 || { echo >&2 "Le paquet jq est requis pour l'option --json."; }
+
+# Variables globales
+DOMAIN=""
+OUTPUT_DIR="results"
+OUTPUT_FILE=""
+LITE_MODE=false
+
+# Outils à vérifier
+TOOLS=("nmap" "sslscan" "whatweb" "dirb" "nikto" "amass" "sublist3r" "theharvester" "finalrecon")
+
+# Crée le dossier de résultats
+mkdir -p "$OUTPUT_DIR"
+
+# Vérifie si un outil est installé
+check_tool() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        echo "⚠️  $1 n'est pas installé. Scan ignoré."
+        return 1
+    fi
+    return 0
+}
+
+# Ajoute un en-tête au fichier
+append_header() {
+    echo "=========================================" >> "$OUTPUT_FILE"
+    echo "Résultat $1 pour $DOMAIN" >> "$OUTPUT_FILE"
+    echo "=========================================" >> "$OUTPUT_FILE"
+}
+
+# Analyse post-scan automatique
+post_scan_analysis() {
+    echo "🔍 Post-analyse automatique des résultats..."
+    echo "---- Ports sensibles trouvés : ----" >> "$OUTPUT_FILE"
+    grep -Ei "22/tcp|21/tcp|23/tcp|3389/tcp" "$OUTPUT_FILE" > temp_ports.txt
+    cat temp_ports.txt >> "$OUTPUT_FILE"
+    rm -f temp_ports.txt
+
+    echo "---- Références CVE détectées : ----" >> "$OUTPUT_FILE"
+    grep -E "CVE-[0-9]{4}-[0-9]{4,7}" "$OUTPUT_FILE" > temp_cves.txt
+    cat temp_cves.txt >> "$OUTPUT_FILE"
+    rm -f temp_cves.txt
+}
+
+# Fonctions scan
+scan_nmap() {
+    if check_tool "nmap"; then
+        echo "▶️  Lancement de Nmap..."
+        append_header "Nmap"
+        nmap -sV --script vulners --script-args mincvss=5.0 -T3 "$DOMAIN" | tee -a "$OUTPUT_FILE"
+        echo "✅ Analyse Nmap terminée."
+    fi
+}
+
+scan_sslscan() {
+    if check_tool "sslscan"; then
+        echo "▶️  Lancement de SSLScan..."
+        append_header "SSLScan"
+        sslscan "$DOMAIN" | tee -a "$OUTPUT_FILE"
+        echo "✅ Analyse SSLScan terminée."
+    fi
+}
+
+scan_whatweb() {
+    if check_tool "whatweb"; then
+        echo "▶️  Lancement de WhatWeb..."
+        append_header "WhatWeb"
+        whatweb "$DOMAIN" | tee -a "$OUTPUT_FILE"
+        echo "✅ Analyse WhatWeb terminée."
+    fi
+}
+
+scan_dirb() {
+    if check_tool "dirb"; then
+        echo "▶️  Lancement de Dirb..."
+        append_header "Dirb"
+
+        if [ "$LITE_MODE" = true ]; then
+            TEMP_WORDLIST="/tmp/dirb_small.txt"
+            if [ ! -f "$TEMP_WORDLIST" ]; then
+                echo "📥 Téléchargement de la wordlist légère pour Dirb..."
+                curl -s -L -o "$TEMP_WORDLIST" "https://raw.githubusercontent.com/v0re/dirb/refs/heads/master/wordlists/small.txt"
+            fi
+            dirb "http://$DOMAIN" "$TEMP_WORDLIST" | tee -a "$OUTPUT_FILE"
+        else
+            dirb "http://$DOMAIN" /usr/share/dirb/wordlists/big.txt | tee -a "$OUTPUT_FILE"
+        fi
+
+        echo "✅ Analyse Dirb terminée."
+    fi
+}
+
+scan_nikto() {
+    if check_tool "nikto"; then
+        echo "▶️  Lancement de Nikto..."
+        append_header "Nikto"
+        nikto -h "$DOMAIN" | tee -a "$OUTPUT_FILE"
+        echo "✅ Analyse Nikto terminée."
+    fi
+}
+
+scan_amass() {
+    if check_tool "amass"; then
+        echo "▶️  Lancement de Amass..."
+        append_header "Amass"
+        if [ "$LITE_MODE" = true ]; then
+            timeout 60s amass enum -passive -src -d "$DOMAIN" | tee -a "$OUTPUT_FILE"
+        else
+            amass enum -d "$DOMAIN" | tee -a "$OUTPUT_FILE"
+        fi
+        echo "✅ Analyse Amass terminée."
+    fi
+}
+
+scan_sublist3r() {
+    if check_tool "sublist3r"; then
+        echo "▶️  Lancement de Sublist3r..."
+        append_header "Sublist3r"
+        sublist3r -d "$DOMAIN" | tee -a "$OUTPUT_FILE"
+        echo "✅ Analyse Sublist3r terminée."
+    fi
+}
+
+scan_theharvester() {
+    if check_tool "theharvester"; then
+        echo "▶️  Lancement de theHarvester..."
+        append_header "theHarvester"
+        theharvester -d "$DOMAIN" -b all | tee -a "$OUTPUT_FILE"
+        echo "✅ Analyse theHarvester terminée."
+    fi
+}
+
+scan_finalrecon() {
+    if check_tool "finalrecon"; then
+        echo "▶️  Lancement de FinalRecon..."
+        append_header "FinalRecon"
+        finalrecon --full "http://$DOMAIN" | tee -a "$OUTPUT_FILE"
+        echo "✅ Analyse FinalRecon terminée."
+    fi
+}
+
+# Menu de sélection
+show_menu() {
+    echo "Sélectionnez un scan à effectuer pour $DOMAIN :"
+    echo "1) Scan complet (ALL)"
+    echo "2) Scan léger (--lite)"
+    echo "3) Scan manuel (sélectionner les outils)"
+    read -rp "Votre choix [1-3]: " choice
+
+    case $choice in
+        1) run_all_scans ;;
+        2) LITE_MODE=true; run_lite_scans ;;
+        3) manual_scan_menu ;;
+        *) echo "Option invalide"; exit 1 ;;
+    esac
+}
+
+run_all_scans() {
+    echo "🟢 Démarrage du scan complet..."
+    scan_nmap
+    scan_sslscan
+    scan_whatweb
+    scan_dirb
+    scan_nikto
+    scan_amass
+    scan_theharvester
+    scan_finalrecon
+    post_scan_analysis
+}
+
+run_lite_scans() {
+    echo "🟡 Mode LITE activé : Scan rapide (Nmap, WhatWeb, Dirb, Sublist3r)"
+    scan_nmap
+    scan_whatweb
+    scan_dirb
+    scan_sublist3r
+    post_scan_analysis
+}
+
+manual_scan_menu() {
+    for tool in "${TOOLS[@]}"; do
+        read -rp "Voulez-vous lancer $tool ? (y/n): " answer
+        if [[ "$answer" =~ ^[Yy]$ ]]; then
+            "scan_$tool"
+        fi
+    done
+    post_scan_analysis
+}
+
+# ----- Point d’entrée -----
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 <domaine>"
+    exit 1
+fi
+
+DOMAIN="$1"
+DATE=$(date +%Y-%m-%d_%H-%M)
+OUTPUT_FILE="$OUTPUT_DIR/${DOMAIN}_${DATE}_scan.txt"
+
+echo "🧰 Démarrage du playbook sur $DOMAIN"
+show_menu
+echo "📄 Rapport complet : $OUTPUT_FILE"
