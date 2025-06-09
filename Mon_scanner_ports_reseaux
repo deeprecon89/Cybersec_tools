@@ -1,0 +1,30 @@
+#!/bin/bash
+# Mon scanner de ports
+ip_cible=$1 # variable pour se reperer, $1 est le premier parametre de la commande : scanner_port.sh ICI <--
+
+# Ci-dessous la liste des ports communs qu'on scanne par defaut
+ports_communs=( 21 25 53 80 443 445 8080 3306 1000 );
+
+# Ci-dessous une fonction (avec les () a la fin)
+scan_port() {
+    #timeout 1 dit que l'on arrete au bout de 1 seconde si aucun resultat
+    timeout 1 bash -c "echo 'rien' > /dev/tcp/$1/$2" &>/dev/null #&>/dev/null dit de ne pas afficher quoi que ce soit dans le terminal
+    if [ $? -eq 0 ]; then # litteralement SI le resultat de la derniere commande vaut 0 ALORS ...
+        echo "Port $2 ouvert sur $1" # 0 vaut pour commande reussie, donc le port est ouvert
+    else # cas SINON (si le resultat de la derniere commande n'etait pas 0
+        echo "Port $2 ferme sur $1" # alors on ecrit que le port est ferme
+    fi
+}
+
+# Le code va commencer ici
+if [ $# -eq 1 ]; then # litteralement : SI le nombre de parametres de la commande scanner_port.sh est de 1 ALORS ...
+    for port in ${ports_communs[*]} ; do # pour chaque port commun, un par un
+        scan_port $ip_cible $port # on le scanne
+    done
+elif [ $# -eq 3 ]; then # SINON SI le nombre de parametres est de 3, ALORS ...
+    for ((port=$2; port<=$3; port++)); do # pour chaque port de  a  fournis au script
+        scan_port $ip_cible $port # on le scanne
+    done
+else # sinon  (si on a ni 1 parametre, ni 3)... alors on montre comment utiliser le script
+    echo "Usage : scanner_port.sh  [ ]"
+fi
